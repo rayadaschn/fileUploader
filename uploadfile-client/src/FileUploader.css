@@ -1,0 +1,28 @@
+.fileUploaderContainer {
+  width: 100%;
+  height: 150px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  border: 2px dashed #08c;
+  border-radius: 8px;
+  padding: 16px;
+  text-align: center;
+}
+
+.fileUploaderContainer:hover {
+  background-color: #40a9ff;
+}
+
+.fileUploaderContainer span {
+  font-size: 60px;
+}
+
+.filePreview,
+.videoPreview,
+.imagePreview {
+  height: 100%;
+  width: auto;
+  object-fit: contain; /* 保持比例不变地缩放 */
+  border-radius: 8px;
+}
