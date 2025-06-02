@@ -44,7 +44,7 @@ async function uploadFile(file, fileName) {
 
   // 实现并行上传
   const request = chunks.map(({ chunk, chunkFileName }) => {
-    return createRequest(filename, chunkFileName, chunk);
+    return createRequest(fileName, chunkFileName, chunk);
   });
 
   try {
