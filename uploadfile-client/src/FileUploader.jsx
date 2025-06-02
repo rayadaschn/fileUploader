@@ -5,6 +5,14 @@ import useDrag from "./useDrag";
 import { Button, message, Progress } from "antd";
 import { CHUNK_SIZE } from "./constant";
 import axiosInstance from "./axiosInstance";
+import axios from "axios";
+
+const UploadStatus = {
+  NOT_STARTED: "not_started", // 上传未开始
+  UPLOADING: "uploading", // 上传中
+  COMPLETED: "completed", // 上传完成
+  PAUSED: "paused", // 上传暂停
+};
 
 /**
  *
@@ -16,10 +24,16 @@ function FileUploader() {
   const uploaderRef = useRef(null);
   const { fileInfo, selectedFile, resetFileStatus } = useDrag(uploaderRef);
   const [uploadProgress, setUploadProgress] = useState(null);
+  // 控制上传状态
+  const [uploadStatus, setUploadStatus] = useState(UploadStatus.NOT_STARTED);
+  const [cancelTokens, setCancelTokens] = useState({});
+
   // 重置状态
   const resetAllStatus = () => {
     resetFileStatus();
     setUploadProgress(null);
+    setUploadStatus(UploadStatus.NOT_STARTED);
+    setCancelTokens({});
   };
   const handleUpload = async () => {
     if (!selectedFile) {
@@ -31,25 +45,68 @@ function FileUploader() {
       selectedFile,
       filename,
       setUploadProgress,
-      resetAllStatus
+      resetAllStatus,
+      setUploadStatus,
+      setCancelTokens
     );
     console.log("🚀 ~ handleUpload ~ chunks:", chunks);
   };
+
+  // 处理上传状态变化
+  const pauseUpload = () => {
+    setUploadStatus(UploadStatus.PAUSED);
+    // 取消上传逻辑
+    cancelTokens.forEach((cancelToken) => {
+      cancelToken.cancel();
+    });
+  };
+
+  const resumeUpload = () => {
+    setUploadStatus(UploadStatus.UPLOADING);
+    // 重新上传逻辑
+    handleUpload();
+  };
+
   const renderButton = () => {
-    return <Button onClick={handleUpload}>上传文件</Button>;
+    switch (uploadStatus) {
+      case UploadStatus.NOT_STARTED:
+        return <Button onClick={handleUpload}>开始上传</Button>;
+      case UploadStatus.UPLOADING:
+        return <Button onClick={pauseUpload}>暂停上传</Button>;
+      case UploadStatus.PAUSED:
+        return (
+          <Button onClick={resumeUpload} type="primary">
+            恢复上传
+          </Button>
+        );
+      default:
+        return null;
+    }
   };
   const renderProgressBar = (progress) => {
-    if (progress === null) return null;
+    if (progress === null || uploadStatus === UploadStatus.NOT_STARTED)
+      return null;
 
-    return Object.keys(progress).map((chunkFileName, index) => {
-      const percent = progress[chunkFileName];
-      return (
-        <div key={index} className="progressBar">
-          <div className="progressBarLabel">{chunkFileName}</div>
-          <Progress percent={percent} />
-        </div>
-      );
-    });
+    const percents = Object.values(progress);
+    console.log("🚀 ~ renderProgressBar ~ percents:", percents);
+    const totalPercent = Math.round(
+      percents.reduce((acc, curr) => acc + curr, 0) / percents.length
+    );
+    return (
+      <div className="progressBarContainer">
+        <div className="progressBarLabel">上传进度{totalPercent}</div>
+        <Progress percent={totalPercent} />
+      </div>
+    );
+    // return Object.keys(progress).map((chunkFileName, index) => {
+    //   const percent = progress[chunkFileName];
+    //   return (
+    //     <div key={index} className="progressBar">
+    //       <div className="progressBarLabel">{chunkFileName}</div>
+    //       <Progress percent={percent} />
+    //     </div>
+    //   );
+    // });
   };
   return (
     <>
@@ -62,9 +119,16 @@ function FileUploader() {
   );
 }
 
-async function uploadFile(file, fileName, setUploadProgress, resetAllStatus) {
+async function uploadFile(
+  file,
+  fileName,
+  setUploadProgress,
+  resetAllStatus,
+  setUploadStatus,
+  setCancelTokens
+) {
   // 检查文件是否已存在
-  const { exists } = await axiosInstance.get("/check", {
+  const { exists, uploadedList } = await axiosInstance.get("/check", {
     params: {
       filename: fileName,
     },
@@ -78,10 +142,43 @@ async function uploadFile(file, fileName, setUploadProgress, resetAllStatus) {
   // 对文件进行切片
   const chunks = createFileChunks(file, fileName, CHUNK_SIZE);
 
+  // 设置中断状态
+  const newCancelTokens = [];
+
   // 实现并行上传
   const request = chunks.map(({ chunk, chunkFileName }) => {
-    return createRequest(fileName, chunkFileName, chunk, setUploadProgress);
+    const cancelToken = axios.CancelToken.source();
+    newCancelTokens.push(cancelToken);
+    // 这里要校验是否已经上传一部分
+    const alreadyUploaded = uploadedList.find(
+      (item) => item.chunkFileName === chunkFileName
+    );
+    // 判断是否已经上传完成, 还是上传了一部分
+    if (alreadyUploaded) {
+      const uploadedSize = alreadyUploaded.size;
+      // 从 chunk 中进行截取, 过滤掉已经上传过的大小
+      const remainingChunk = chunk.slice(uploadedSize);
+      // 如果剩余的分片大小为 0, 则不需要上传
+      if (remainingChunk.size === 0) {
+        return Promise.resolve(); // 如果没有剩余分片, 则直接返回已完成的 Promise
+      }
+      // 如果有剩余分片, 则继续上传
+      chunk = remainingChunk;
+    }
+
+    return createRequest(
+      fileName,
+      chunkFileName,
+      chunk,
+      setUploadProgress,
+      cancelToken
+    );
   });
+
+  // 更新取消令牌状态
+  setCancelTokens(newCancelTokens);
+  // 设置上传状态为上传中
+  setUploadStatus(UploadStatus.UPLOADING);
 
   try {
     // 并行上传每个分片
@@ -95,11 +192,22 @@ async function uploadFile(file, fileName, setUploadProgress, resetAllStatus) {
     message.success("文件上传成功");
     resetAllStatus(); // 重置状态
   } catch (error) {
-    message.error("文件上传失败:", error.message);
+    // 判断是否为用户主动取消
+    if (axios.isCancel(error)) {
+      message.warning("文件上传已取消");
+    } else {
+      message.error("文件上传失败");
+    }
   }
 }
 
-function createRequest(filename, chunkFileName, chunk, setUploadProgress) {
+function createRequest(
+  filename,
+  chunkFileName,
+  chunk,
+  setUploadProgress,
+  cancelToken
+) {
   return axiosInstance.post("/upload", chunk, {
     headers: {
       "Content-Type": "application/octet-stream",
@@ -120,6 +228,7 @@ function createRequest(filename, chunkFileName, chunk, setUploadProgress) {
         [chunkFileName]: percentCompleted,
       }));
     },
+    cancelToken: cancelToken.token, // 添加取消令牌
   });
 }
 
