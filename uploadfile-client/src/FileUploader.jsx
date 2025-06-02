@@ -63,6 +63,18 @@ function FileUploader() {
 }
 
 async function uploadFile(file, fileName, setUploadProgress, resetAllStatus) {
+  // 检查文件是否已存在
+  const { exists } = await axiosInstance.get("/check", {
+    params: {
+      filename: fileName,
+    },
+  });
+
+  if (exists) {
+    message.error("文件已存在，请勿重复上传");
+    resetAllStatus(); // 重置状态
+    return;
+  }
   // 对文件进行切片
   const chunks = createFileChunks(file, fileName, CHUNK_SIZE);
 

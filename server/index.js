@@ -122,6 +122,36 @@ async function mergeChunks(filename) {
   }
 }
 
+/** 校验文件是否已经存在 */
+app.get("/api/check", async (req, res, next) => {
+  const { filename } = req.query;
+  if (!filename) {
+    return res.status(400).send("No filename provided.");
+  }
+
+  const filePath = path.resolve(PUBLIC_DIR, filename);
+  try {
+    // 检查文件是否存在
+    const exists = await fs.pathExists(filePath);
+    if (exists) {
+      return res.json({
+        success: true,
+        message: "File already exists.",
+        exists: true,
+      });
+    } else {
+      return res.json({
+        success: true,
+        message: "File does not exist.",
+        exists: false,
+      });
+    }
+  } catch (error) {
+    console.error("🚀 ~ app.get ~ error:", error);
+    next(error);
+  }
+});
+
 // 应用启动
 app.listen(8000, () => {
   console.log("Server is running on http://localhost:8000");
