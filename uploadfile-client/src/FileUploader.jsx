@@ -1,8 +1,8 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { InboxOutlined } from "@ant-design/icons";
 import "./FileUploader.css"; // Assuming you have a CSS module for styles
 import useDrag from "./useDrag";
-import { Button, message } from "antd";
+import { Button, message, Progress } from "antd";
 import { CHUNK_SIZE } from "./constant";
 import axiosInstance from "./axiosInstance";
 
@@ -14,19 +14,42 @@ import axiosInstance from "./axiosInstance";
  */
 function FileUploader() {
   const uploaderRef = useRef(null);
-  const { fileInfo, selectedFile } = useDrag(uploaderRef);
-
+  const { fileInfo, selectedFile, resetFileStatus } = useDrag(uploaderRef);
+  const [uploadProgress, setUploadProgress] = useState(null);
+  // 重置状态
+  const resetAllStatus = () => {
+    resetFileStatus();
+    setUploadProgress(null);
+  };
   const handleUpload = async () => {
     if (!selectedFile) {
       return message.error("请先选择或拖拽文件");
     }
 
     const filename = await getFileName(selectedFile);
-    const chunks = await uploadFile(selectedFile, filename);
+    const chunks = await uploadFile(
+      selectedFile,
+      filename,
+      setUploadProgress,
+      resetAllStatus
+    );
     console.log("🚀 ~ handleUpload ~ chunks:", chunks);
   };
   const renderButton = () => {
     return <Button onClick={handleUpload}>上传文件</Button>;
+  };
+  const renderProgressBar = (progress) => {
+    if (progress === null) return null;
+
+    return Object.keys(progress).map((chunkFileName, index) => {
+      const percent = progress[chunkFileName];
+      return (
+        <div key={index} className="progressBar">
+          <div className="progressBarLabel">{chunkFileName}</div>
+          <Progress percent={percent} />
+        </div>
+      );
+    });
   };
   return (
     <>
@@ -34,17 +57,18 @@ function FileUploader() {
         {renderFilePreview(fileInfo)}
       </div>
       {renderButton()}
+      {renderProgressBar(uploadProgress)}
     </>
   );
 }
 
-async function uploadFile(file, fileName) {
+async function uploadFile(file, fileName, setUploadProgress, resetAllStatus) {
   // 对文件进行切片
   const chunks = createFileChunks(file, fileName, CHUNK_SIZE);
 
   // 实现并行上传
   const request = chunks.map(({ chunk, chunkFileName }) => {
-    return createRequest(fileName, chunkFileName, chunk);
+    return createRequest(fileName, chunkFileName, chunk, setUploadProgress);
   });
 
   try {
@@ -57,12 +81,13 @@ async function uploadFile(file, fileName) {
       },
     });
     message.success("文件上传成功");
+    resetAllStatus(); // 重置状态
   } catch (error) {
     message.error("文件上传失败:", error.message);
   }
 }
 
-function createRequest(filename, chunkFileName, chunk) {
+function createRequest(filename, chunkFileName, chunk, setUploadProgress) {
   return axiosInstance.post("/upload", chunk, {
     headers: {
       "Content-Type": "application/octet-stream",
@@ -72,6 +97,16 @@ function createRequest(filename, chunkFileName, chunk) {
     params: {
       filename,
       chunkFileName,
+    },
+    onUploadProgress: (progressEvent) => {
+      // progressEvent 是一个 ProgressEvent 对象, 包含上传进度信息
+      const percentCompleted = Math.round(
+        (progressEvent.loaded * 100) / progressEvent.total
+      );
+      setUploadProgress((prevProgress) => ({
+        ...prevProgress,
+        [chunkFileName]: percentCompleted,
+      }));
     },
   });
 }

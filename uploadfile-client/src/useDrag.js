@@ -74,7 +74,13 @@ function useDrag(uploadRef) {
     };
   }, [selectedFile]);
 
-  return { fileInfo, selectedFile };
+  /** 清空状态 */
+  const resetFileStatus = () => {
+    setSelectedFile(null);
+    setFileInfo({ url: null, fileName: null });
+  };
+
+  return { fileInfo, selectedFile, resetFileStatus };
 }
 
 export default useDrag;
