@@ -4,6 +4,7 @@ const {} = require("http-status-codes");
 const cors = require("cors");
 const fs = require("fs-extra");
 const path = require("path");
+const crypto = require("crypto");
 const { Transform } = require("stream");
 const PUBLIC_DIR = path.join(__dirname, "public");
 const TEMP_DIR = path.join(__dirname, "temp");
@@ -155,6 +156,27 @@ function pipStream(rs, ws) {
   });
 }
 
+/** hash 计算 */
+function hashStream(filePath, algorithm = "sha256") {
+  return new Promise((resolve, reject) => {
+    const hash = crypto.createHash(algorithm);
+    const stream = fs.createReadStream(filePath);
+
+    stream.on("data", (chunk) => {
+      hash.update(chunk);
+    });
+
+    stream.on("end", () => {
+      const digest = hash.digest("hex");
+      resolve(digest);
+    });
+
+    stream.on("error", (err) => {
+      reject(err);
+    });
+  });
+}
+
 async function mergeChunks(filename) {
   const chunkDir = path.resolve(TEMP_DIR, filename);
   const chunkFiles = await fs.readdir(chunkDir);
@@ -183,6 +205,13 @@ async function mergeChunks(filename) {
         return pipStream(rs, ws);
       })
     );
+
+    // 加密校验
+    const hash = await hashStream(mergedFilePath);
+    const hashFile = filename.split(".")[0];
+    if (hash !== hashFile) {
+      throw new Error("File hash mismatch after merging.");
+    }
 
     // 合并完成后, 删除分片目录
     await fs.rmdir(chunkDir, { recursive: true }); // 删除分片目录

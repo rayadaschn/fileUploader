@@ -3,7 +3,7 @@ import { InboxOutlined } from "@ant-design/icons";
 import "./FileUploader.css"; // Assuming you have a CSS module for styles
 import useDrag from "./useDrag";
 import { Button, message, Progress, Spin } from "antd";
-import { CHUNK_SIZE } from "./constant";
+import { CHUNK_SIZE, MAX_RETRIES } from "./constant";
 import axiosInstance from "./axiosInstance";
 import axios from "axios";
 
@@ -32,8 +32,8 @@ function FileUploader() {
   const [filenameWorker, setFilenameWorker] = useState(null);
   useEffect(() => {
     // 这里的文件路径是相对于 public 目录的, 因为 Worker 会在浏览器中运行
-    // 使用 import.meta.url 来获取当前模块的 URL
-    const worker = new Worker("/filenameWorker.js");
+    // 使用 import.meta.url 来获取当前模块的 URL, 以在 vite 中正确解析 Worker 的路径
+    const worker = new Worker(new URL("./filenameWorker.js", import.meta.url));
 
     setFilenameWorker(worker);
     return () => {
@@ -58,9 +58,8 @@ function FileUploader() {
 
     // const filename = await getFileName(selectedFile);
     // 这里改用 Worker 来计算文件名
-    filenameWorker.postMessage("message", { file: selectedFile });
+    filenameWorker.postMessage({ file: selectedFile });
     setIsCalculatingFileName(true);
-    message.info("正在计算文件名，请稍候...");
 
     // 监听 Worker 返回的文件名
     filenameWorker.onmessage = async (event) => {
@@ -141,7 +140,7 @@ function FileUploader() {
         {renderFilePreview(fileInfo)}
       </div>
       {renderButton()}
-      {isCalculatingFileName && <Spin tip="计算文件名中...">计算中</Spin>}
+      {isCalculatingFileName && <Spin tip="计算文件名中..."> </Spin>}
       {renderProgressBar(uploadProgress)}
     </>
   );
@@ -153,7 +152,8 @@ async function uploadFile(
   setUploadProgress,
   resetAllStatus,
   setUploadStatus,
-  setCancelTokens
+  setCancelTokens,
+  retryCount = 0
 ) {
   // 检查文件是否已存在
   const { exists, uploadedList } = await axiosInstance.get("/check", {
@@ -222,10 +222,27 @@ async function uploadFile(
   } catch (error) {
     // 判断是否为用户主动取消
     if (axios.isCancel(error)) {
-      message.warning("文件上传已取消");
-    } else {
-      message.error("文件上传失败");
+      return message.warning("文件上传已取消");
     }
+
+    // 如果是其他错误, 则判断是否重试次数超过最大重试次数
+    if (retryCount < MAX_RETRIES) {
+      message.error(
+        `文件上传失败，正在重试...(${retryCount + 1}/${MAX_RETRIES})`
+      );
+      // 递归调用上传函数, 增加重试次数
+      return uploadFile(
+        file,
+        fileName,
+        setUploadProgress,
+        resetAllStatus,
+        setUploadStatus,
+        setCancelTokens,
+        retryCount + 1
+      );
+    }
+
+    message.error("文件上传失败");
   }
 }
 
