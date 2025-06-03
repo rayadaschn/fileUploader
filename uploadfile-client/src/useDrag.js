@@ -14,6 +14,7 @@ function useDrag(uploadRef) {
       return message.error("No file selected");
     }
     if (!SUPPORTED_FORMATS.includes(file.type)) {
+      console.log("🚀 ~ checkFile ~ file.type:", file.type);
       return message.error(
         `Unsupported file format. Supported formats are: ${SUPPORTED_FORMATS.join(
           ", "

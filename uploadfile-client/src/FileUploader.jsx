@@ -1,8 +1,8 @@
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { InboxOutlined } from "@ant-design/icons";
 import "./FileUploader.css"; // Assuming you have a CSS module for styles
 import useDrag from "./useDrag";
-import { Button, message, Progress } from "antd";
+import { Button, message, Progress, Spin } from "antd";
 import { CHUNK_SIZE } from "./constant";
 import axiosInstance from "./axiosInstance";
 import axios from "axios";
@@ -26,7 +26,23 @@ function FileUploader() {
   const [uploadProgress, setUploadProgress] = useState(null);
   // 控制上传状态
   const [uploadStatus, setUploadStatus] = useState(UploadStatus.NOT_STARTED);
+  // 存放所有上传请求的取消令牌
   const [cancelTokens, setCancelTokens] = useState({});
+  // 设置 filenameWorker
+  const [filenameWorker, setFilenameWorker] = useState(null);
+  useEffect(() => {
+    // 这里的文件路径是相对于 public 目录的, 因为 Worker 会在浏览器中运行
+    // 使用 import.meta.url 来获取当前模块的 URL
+    const worker = new Worker("/filenameWorker.js");
+
+    setFilenameWorker(worker);
+    return () => {
+      worker.terminate(); // 清理 Worker
+      setFilenameWorker(null);
+    };
+  }, []);
+  // 计算文件名的状态
+  const [isCalculatingFileName, setIsCalculatingFileName] = useState(false);
 
   // 重置状态
   const resetAllStatus = () => {
@@ -40,16 +56,27 @@ function FileUploader() {
       return message.error("请先选择或拖拽文件");
     }
 
-    const filename = await getFileName(selectedFile);
-    const chunks = await uploadFile(
-      selectedFile,
-      filename,
-      setUploadProgress,
-      resetAllStatus,
-      setUploadStatus,
-      setCancelTokens
-    );
-    console.log("🚀 ~ handleUpload ~ chunks:", chunks);
+    // const filename = await getFileName(selectedFile);
+    // 这里改用 Worker 来计算文件名
+    filenameWorker.postMessage("message", { file: selectedFile });
+    setIsCalculatingFileName(true);
+    message.info("正在计算文件名，请稍候...");
+
+    // 监听 Worker 返回的文件名
+    filenameWorker.onmessage = async (event) => {
+      const { filename } = event.data;
+      setIsCalculatingFileName(false);
+
+      const chunks = await uploadFile(
+        selectedFile,
+        filename,
+        setUploadProgress,
+        resetAllStatus,
+        setUploadStatus,
+        setCancelTokens
+      );
+      console.log("🚀 ~ handleUpload ~ chunks:", chunks);
+    };
   };
 
   // 处理上传状态变化
@@ -114,6 +141,7 @@ function FileUploader() {
         {renderFilePreview(fileInfo)}
       </div>
       {renderButton()}
+      {isCalculatingFileName && <Spin tip="计算文件名中...">计算中</Spin>}
       {renderProgressBar(uploadProgress)}
     </>
   );
@@ -252,30 +280,6 @@ function createFileChunks(file, fileName, chunkSize = 1024 * 1024) {
   }
 
   return chunks;
-}
-
-/** 依据文件对象获取根据文件内容得到的 hash 文件名 */
-async function getFileName(file) {
-  // 计算此文件的 hash 值
-  const fileHash = await calculateFileHash(file);
-  // 获取文件拓展名
-  const fileExtension = file.name.split(".").pop();
-  // 使用 hash 值生成文件名
-  return `${fileHash}.${fileExtension}`;
-}
-
-/** 计算文件的 hash 文件名 */
-async function calculateFileHash(file) {
-  const buffer = await file.arrayBuffer(); // 将文件转换为 ArrayBuffer
-  // 使用 SubtleCrypto API 计算 SHA-256 哈希
-  const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  // 将 ArrayBuffer 转换为十六进制字符串
-  // 这里使用了 Uint8Array 来处理 ArrayBuffer
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hashHex = hashArray
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("");
-  return hashHex;
 }
 
 /** 渲染文件预览 */
