@@ -24,12 +24,13 @@ async function getFileName(file) {
 
 /** 计算文件的 hash 文件名 */
 async function calculateFileHash(file) {
-  const buffer = await file.arrayBuffer(); // 将文件转换为 ArrayBuffer
-  // 使用 SubtleCrypto API 计算 SHA-256 哈希
+  const buffer = await file.arrayBuffer(); // 将文件转换为 ArrayBuffer, ArrayBuffer 是一段原始的二进制数据，不能直接操作或打印。
+  // 使用 SubtleCrypto API 计算 SHA-256 哈希, 这里返回的是一个 Promise，解析后得到的也是一个 ArrayBuffer。
   const hashBuffer = await crypto.subtle.digest("SHA-256", buffer);
-  // 将 ArrayBuffer 转换为十六进制字符串
-  // 这里使用了 Uint8Array 来处理 ArrayBuffer
+  // 将 ArrayBuffer 转换为十六进制字符串, 这里使用了 Uint8Array 来处理 ArrayBuffer。Uint8Array 是一种视图，可以把 ArrayBuffer 按字节（0~255）访问。
+  // hashArray 是一个字节数组（Uint8Array），每个元素是 0~255 的数字。
   const hashArray = Array.from(new Uint8Array(hashBuffer));
+  // 把每个字节转成 16 进制字符串（如 15 变成 "f"），再用 padStart(2, "0") 补齐到两位（如 "f" 变成 "0f"）。
   const hashHex = hashArray
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
